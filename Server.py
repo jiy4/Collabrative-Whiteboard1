@@ -35,26 +35,47 @@ def handle_client(client_socket, addr):
                     broadcast(message)
     except Exception as e:
         print(f"Error with client {addr}: {e}")
+    # finally:
+    #     with clients_lock:
+    #         username = clients.get(client_socket, "Anonymous")
+    #         if client_socket in clients:
+    #             del clients[client_socket]
+    #             broadcast({"type": "leave", "username": username})
+    #     client_socket.close()
+    #     print(f"Client {addr} ({username}) disconnected")
+
     finally:
         with clients_lock:
             username = clients.get(client_socket, "Anonymous")
             if client_socket in clients:
                 del clients[client_socket]
-                broadcast({"type": "leave", "username": username})
+        broadcast({"type": "leave", "username": username})  # ← moved OUTSIDE the lock
         client_socket.close()
-        print(f"Client {addr} ({username}) disconnected")
+        print(f"Client {addr} ({username}) disconnected")    
 
 
+# def broadcast(message):
+#     data = json.dumps(message).encode('utf-8') + b'\n'
+#     with clients_lock:
+#         for client in list(clients.keys()):
+#             try:
+#                 client.sendall(data)
+#             except:
+#                 client.close()
+#                 del clients[client]
 def broadcast(message):
     data = json.dumps(message).encode('utf-8') + b'\n'
+    dead_clients = []
     with clients_lock:
         for client in list(clients.keys()):
             try:
                 client.sendall(data)
             except:
-                client.close()
+                dead_clients.append(client)
+        for client in dead_clients:
+            client.close()
+            if client in clients:
                 del clients[client]
-
 
 def main():
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
