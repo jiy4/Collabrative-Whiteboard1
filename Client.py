@@ -185,27 +185,57 @@ class WhiteboardApp:
         self.current_stroke_id = None
         self.send_message({"type": "status", "username": self.username, "status": "idle"})
 
+    # def undo(self):
+    #     if self.undo_stack:
+    #         stroke_id = self.undo_stack.pop()
+    #         self.redo_stack.append(stroke_id)
+    #         self.send_message({"type": "undo", "stroke_id": stroke_id, "username": self.username})
+    #         if stroke_id in self.own_strokes:
+    #             self.undone_strokes[stroke_id] = self.own_strokes[stroke_id]  # Store stroke for redo
+    #             del self.own_strokes[stroke_id]
+    #         self.redraw_canvas()
+
     def undo(self):
         if self.undo_stack:
             stroke_id = self.undo_stack.pop()
             self.redo_stack.append(stroke_id)
             self.send_message({"type": "undo", "stroke_id": stroke_id, "username": self.username})
             if stroke_id in self.own_strokes:
-                self.undone_strokes[stroke_id] = self.own_strokes[stroke_id]  # Store stroke for redo
+                self.undone_strokes[stroke_id] = self.own_strokes[stroke_id]
                 del self.own_strokes[stroke_id]
+        # Cap undone_strokes to last 50 to prevent memory leak
+            if len(self.undone_strokes) > 50:
+                oldest_key = next(iter(self.undone_strokes))
+                del self.undone_strokes[oldest_key]
             self.redraw_canvas()
+
+
+    # def redo(self):
+    #     if self.redo_stack:
+    #         stroke_id = self.redo_stack.pop()
+    #         self.undo_stack.append(stroke_id)
+    #         if stroke_id in self.undone_strokes:
+    #             self.own_strokes[stroke_id] = self.undone_strokes[stroke_id]  # Restore stroke locally
+    #             # Send each line of the stroke to other clients
+    #             for line in self.undone_strokes[stroke_id]:
+    #                 self.send_message(line)  # Send draw message for each line
+    #             del self.undone_strokes[stroke_id]  # Remove from undone strokes
+    #         self.redraw_canvas()
 
     def redo(self):
         if self.redo_stack:
             stroke_id = self.redo_stack.pop()
             self.undo_stack.append(stroke_id)
-            if stroke_id in self.undone_strokes:
-                self.own_strokes[stroke_id] = self.undone_strokes[stroke_id]  # Restore stroke locally
-                # Send each line of the stroke to other clients
-                for line in self.undone_strokes[stroke_id]:
-                    self.send_message(line)  # Send draw message for each line
-                del self.undone_strokes[stroke_id]  # Remove from undone strokes
-            self.redraw_canvas()
+        if stroke_id in self.undone_strokes:
+            self.own_strokes[stroke_id] = self.undone_strokes[stroke_id]
+            self.send_message({
+                "type": "redo",
+                "stroke_id": stroke_id,
+                "lines": self.undone_strokes[stroke_id],
+                "username": self.username
+            })
+            del self.undone_strokes[stroke_id]
+        self.redraw_canvas()
 
     def redraw_canvas(self):
         self.canvas.delete("all")
@@ -281,6 +311,21 @@ class WhiteboardApp:
                 self.show_drawing_bubble(message["username"])
             else:
                 self.hide_drawing_bubble(message["username"])
+        # elif msg_type == "undo":
+        #     stroke_id = message.get("stroke_id")
+        #     if message["username"] != self.username:
+        #         strokes = self.other_users_strokes.get(message["username"], {})
+        #         if stroke_id in strokes:
+        #             del strokes[stroke_id]
+        #         self.redraw_canvas()
+        # elif msg_type == "redo":
+        #     stroke_id = message.get("stroke_id")
+        #     username = message.get("username")
+        #     if username != self.username:
+        #         user_strokes = self.other_users_strokes.get(username, {})
+        #         # Redo is handled via draw messages, so no action needed here
+        #         pass
+
         elif msg_type == "undo":
             stroke_id = message.get("stroke_id")
             if message["username"] != self.username:
@@ -291,10 +336,11 @@ class WhiteboardApp:
         elif msg_type == "redo":
             stroke_id = message.get("stroke_id")
             username = message.get("username")
+            lines = message.get("lines", [])
             if username != self.username:
-                user_strokes = self.other_users_strokes.get(username, {})
-                # Redo is handled via draw messages, so no action needed here
-                pass
+                user_strokes = self.other_users_strokes.setdefault(username, {})
+                user_strokes[stroke_id] = lines
+                self.redraw_canvas()
 
     def show_drawing_bubble(self, username):
         if username == self.username:
